@@ -1,6 +1,10 @@
 import torch
 from torch import nn
 from d2l import torch as d2l
+import time
+
+# 记录程序开始时间
+start_time = time.time()
 
 net = nn.Sequential(
     nn.Conv2d(1, 6, kernel_size=5, padding=2), nn.Sigmoid(),
@@ -81,5 +85,10 @@ def train_ch6(net, train_iter, test_iter, num_epochs, lr, device):
           f'on {str(device)}')
     
 lr, num_epochs = 0.9, 10
-train_ch6(net, train_iter, test_iter, num_epochs, lr, d2l.try_gpu())
-d2l.plt.show()
+train_ch6(net, train_iter, test_iter, num_epochs, lr, torch.device('mps'))
+# d2l.plt.show()
+
+# 计算并打印程序执行耗时
+end_time = time.time()
+elapsed_time = end_time - start_time
+print(f'\n程序执行耗时: {elapsed_time:.4f} 秒 ({elapsed_time*1000:.2f} 毫秒)')
