@@ -1,9 +1,13 @@
 
 import math
+import time
 import torch
 from torch import nn
 from torch.nn import functional as F
 from d2l import torch as d2l
+
+# 记录程序开始时间
+start_time = time.time()
 
 batch_size, num_steps = 32, 35
 time_machine = d2l.TimeMachine(batch_size, num_steps)
@@ -93,3 +97,8 @@ def predict_ch8(prefix, num_preds, net, vocab, device):  #@save
 
 res = predict_ch8('time traveller ', 10, net, vocab, d2l.try_gpu())
 print(res)
+
+# 计算并打印程序执行耗时
+end_time = time.time()
+elapsed_time = end_time - start_time
+print(f'\n程序执行耗时: {elapsed_time:.4f} 秒 ({elapsed_time*1000:.2f} 毫秒)')
