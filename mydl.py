@@ -1,3 +1,5 @@
+#由于安装的是最新的d2l包，会和动手学深度学习中的代码不一致，所以需要把书中的d2l部分代码copy过来
+
 import random
 import torch
 from d2l import torch as d2l
@@ -8,10 +10,17 @@ d2l.DATA_HUB['time_machine'] = (d2l.DATA_URL + 'timemachine.txt',
                                 '090b5e7e70c295757f55df93cb0a180b9691891a')
 
 def read_time_machine():  #@save
+    
+    # with open('../data/war_of_the_worlds.txt', 'r') as f:
+    #     lines = f.readlines()
+    #     return [re.sub('[^A-Za-z]+', ' ', line).strip().lower() for line in lines]
+
+
     """将时间机器数据集加载到文本行的列表中"""
     with open(d2l.download('time_machine'), 'r') as f:
         lines = f.readlines()
     return [re.sub('[^A-Za-z]+', ' ', line).strip().lower() for line in lines]
+
 
 def count_corpus(tokens):  #@save
     """统计词元的频率"""
@@ -63,34 +72,7 @@ class Vocab:  #@save
     @property
     def token_freqs(self):
         return self._token_freqs
-
-
-lines = read_time_machine()
-tokens = d2l.tokenize(lines)
-# 因为每个文本行不一定是一个句子或一个段落，因此我们把所有文本行拼接到一起
-corpus = [token for line in tokens for token in line]
-vocab = Vocab(corpus)
-# print(vocab.token_freqs[:10])
-
-freqs = [freq for token, freq in vocab.token_freqs]
-d2l.plot(freqs, xlabel='token: x', ylabel='frequency: n(x)',
-         xscale='log', yscale='log')
-
-bigram_tokens = [pair for pair in zip(corpus[:-1], corpus[1:])]
-bigram_vocab = Vocab(bigram_tokens)
-# print(bigram_vocab.token_freqs[:10])
-
-trigram_tokens = [triple for triple in zip(
-    corpus[:-2], corpus[1:-1], corpus[2:])]
-trigram_vocab = Vocab(trigram_tokens)
-# print(trigram_vocab.token_freqs[:10])
-
-bigram_freqs = [freq for token, freq in bigram_vocab.token_freqs]
-trigram_freqs = [freq for token, freq in trigram_vocab.token_freqs]
-# d2l.plot([freqs, bigram_freqs, trigram_freqs], xlabel='token: x',
-#          ylabel='frequency: n(x)', xscale='log', yscale='log',
-#          legend=['unigram', 'bigram', 'trigram'])
-
+    
 def tokenize(lines, token='word'):  #@save
     """将文本行拆分为单词或字符词元"""
     if token == 'word':
@@ -137,12 +119,6 @@ def seq_data_iter_random(corpus, batch_size, num_steps):  #@save
         Y = [data(j + 1) for j in initial_indices_per_batch]
         yield torch.tensor(X), torch.tensor(Y)
         
-my_seq = list(range(35))
-# for X, Y in seq_data_iter_random(my_seq, batch_size=2, num_steps=5):
-#     print('X: ', X, '\nY:', Y)
-    
-# print("--------------------------------")
-    
 def seq_data_iter_sequential(corpus, batch_size, num_steps):  #@save
     """使用顺序分区生成一个小批量子序列"""
     # 从随机偏移量开始划分序列
@@ -158,9 +134,7 @@ def seq_data_iter_sequential(corpus, batch_size, num_steps):  #@save
         Y = Ys[:, i: i + num_steps]
         yield X, Y
         
-# for X, Y in seq_data_iter_sequential(my_seq, batch_size=2, num_steps=5):
-#     print('X: ', X, '\nY:', Y)
-    
+        
 class SeqDataLoader:  #@save
     """加载序列数据的迭代器"""
     def __init__(self, batch_size, num_steps, use_random_iter, max_tokens):
@@ -181,14 +155,11 @@ def load_data_time_machine(batch_size, num_steps,  #@save
     data_iter = SeqDataLoader(
         batch_size, num_steps, use_random_iter, max_tokens)
     return data_iter, data_iter.vocab
-    
 
-# d2l.plt.show()
-
-sum = 0
-data_iter, vocab = load_data_time_machine(batch_size=32, num_steps=35, use_random_iter=False)
-for X, Y in data_iter:
-    sum += X.shape[0]
-    print('X shape: ', X.shape, 'Y shape: ', Y.shape)
-
-print('sum: ', sum)
+def try_gpu():
+    """如果存在，则返回gpu(i)，否则返回cpu()"""
+    if torch.cuda.is_available():
+        return torch.device(f'cuda:{torch.cuda.current_device()}')
+    if torch.backends.mps.is_available():
+        return torch.device('mps')
+    return torch.device('cpu')

@@ -1,15 +1,26 @@
+
 import math
+import time
 import torch
 from torch import nn
 from torch.nn import functional as F
 from d2l import torch as d2l
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import mydl
+
+# 记录程序开始时间
+start_time = time.time()
 
 batch_size, num_steps = 32, 35
-train_iter, vocab = mydl.load_data_time_machine(batch_size, num_steps)
+time_machine = d2l.TimeMachine(batch_size, num_steps)
+vocab = time_machine.vocab
+train_iter = time_machine.get_dataloader(train=True)
+print(vocab.idx_to_token)
+
+
+# a = F.one_hot(torch.tensor([0, 2,4]), len(vocab))
+# print(a)
+
+X = torch.arange(10).reshape((2, 5))
+# F.one_hot(X.T, 28).shape
 
 def get_params(vocab_size, num_hiddens, device):
     num_inputs = num_outputs = vocab_size
@@ -30,8 +41,10 @@ def get_params(vocab_size, num_hiddens, device):
         param.requires_grad_(True)
     return params
 
+
 def init_rnn_state(batch_size, num_hiddens, device):
     return (torch.zeros((batch_size, num_hiddens), device=device), )
+
 
 def rnn(inputs, state, params):
     # inputs的形状：(时间步数量，批量大小，词表大小)
@@ -60,26 +73,35 @@ class RNNModelScratch: #@save
     def begin_state(self, batch_size, device):
         return self.init_state(batch_size, self.num_hiddens, device)
     
-    
 num_hiddens = 512
-net = RNNModelScratch(len(vocab), num_hiddens, mydl.try_gpu(), get_params,
+net = RNNModelScratch(len(vocab), num_hiddens, d2l.try_gpu(), get_params,
                       init_rnn_state, rnn)
+state = net.begin_state(X.shape[0], d2l.try_gpu())
+Y, new_state = net(X.to(d2l.try_gpu()), state)
+Y.shape, len(new_state), new_state[0].shape
+
+# print(Y)
+# print(new_state)
 
 def predict_ch8(prefix, num_preds, net, vocab, device):  #@save
     """在prefix后面生成新字符"""
     state = net.begin_state(batch_size=1, device=device)
-    outputs = [vocab[prefix[0]]]
+    s = prefix[0]
+    outputs = [vocab[s]]
     get_input = lambda: torch.tensor([outputs[-1]], device=device).reshape((1, 1))
     for y in prefix[1:]:  # 预热期
-        _, state = net(get_input(), state)
+        input_index = get_input()
+        _, state = net(input_index, state)
         outputs.append(vocab[y])
     for _ in range(num_preds):  # 预测num_preds步
         y, state = net(get_input(), state)
         outputs.append(int(y.argmax(dim=1).reshape(1)))
     return ''.join([vocab.idx_to_token[i] for i in outputs])
 
-# res = predict_ch8('time traveller ', 10, net, vocab, mydl.try_gpu())
-# print(res)
+res = predict_ch8('time traveller ', 10, net, vocab, d2l.try_gpu())
+print(res)
+
+
 
 def grad_clipping(net, theta):  #@save
     """裁剪梯度"""
@@ -102,13 +124,21 @@ def train_epoch_ch8(net, train_iter, loss, updater, device, use_random_iter):
             # 在第一次迭代或使用随机抽样时初始化state
             state = net.begin_state(batch_size=X.shape[0], device=device)
         else:
+            # 检查批量大小是否匹配，如果不匹配则重新初始化状态
+            current_batch_size = X.shape[0]
             if isinstance(net, nn.Module) and not isinstance(state, tuple):
                 # state对于nn.GRU是个张量
-                state.detach_()
+                if state.shape[0] != current_batch_size:
+                    state = net.begin_state(batch_size=current_batch_size, device=device)
+                else:
+                    state.detach_()
             else:
-                # state对于nn.LSTM或对于我们从零开始实现的模型是个张量
-                for s in state:
-                    s.detach_()
+                # state对于nn.LSTM或对于我们从零开始实现的模型是个元组
+                if state[0].shape[0] != current_batch_size:
+                    state = net.begin_state(batch_size=current_batch_size, device=device)
+                else:
+                    for s in state:
+                        s.detach_()
         y = Y.T.reshape(-1)
         X, y = X.to(device), y.to(device)
         y_hat, state = net(X, state)
@@ -149,15 +179,11 @@ def train_ch8(net, train_iter, vocab, lr, num_epochs, device,
     print(f'困惑度 {ppl:.1f}, {speed:.1f} 词元/秒 {str(device)}')
     print(predict('time traveller'))
     print(predict('traveller'))
-    print(predict('professor simon newcomb was expounding'))
-    print(predict('the psychologist seemed about'))
-    print(predict('hello world'))
     
 num_epochs, lr = 500, 1
-train_ch8(net, train_iter, vocab, lr, num_epochs, mydl.try_gpu())
+train_ch8(net, train_iter, vocab, lr, num_epochs, d2l.try_gpu())
 
-
-# train_ch8(net, train_iter, vocab, lr, num_epochs, mydl.try_gpu(),
-#           use_random_iter=True)
-
-d2l.plt.show()
+# 计算并打印程序执行耗时
+end_time = time.time()
+elapsed_time = end_time - start_time
+print(f'\n程序执行耗时: {elapsed_time:.4f} 秒 ({elapsed_time*1000:.2f} 毫秒)')

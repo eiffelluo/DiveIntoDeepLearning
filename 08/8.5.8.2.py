@@ -138,7 +138,7 @@ def train_ch8(net, train_iter, vocab, lr, num_epochs, device,
         updater = torch.optim.SGD(net.parameters(), lr)
     else:
         updater = lambda batch_size: d2l.sgd(net.params, lr, batch_size)
-    predict = lambda prefix: predict_ch8(prefix, 50, net, vocab, device)
+    predict = lambda prefix: predict_ch8(prefix, 100, net, vocab, device)
     # 训练和预测
     for epoch in range(num_epochs):
         ppl, speed = train_epoch_ch8(
@@ -147,7 +147,7 @@ def train_ch8(net, train_iter, vocab, lr, num_epochs, device,
             print(predict('time traveller'))
             animator.add(epoch + 1, [ppl])
     print(f'困惑度 {ppl:.1f}, {speed:.1f} 词元/秒 {str(device)}')
-    print(predict('time traveller'))
+    print(predict('no one would have believed'))
     print(predict('traveller'))
     print(predict('professor simon newcomb was expounding'))
     print(predict('the psychologist seemed about'))
