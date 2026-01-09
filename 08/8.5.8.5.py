@@ -40,7 +40,7 @@ def rnn(inputs, state, params):
     outputs = []
     # X的形状：(批量大小，词表大小)
     for X in inputs:
-        H = torch.tanh(torch.mm(X, W_xh) + torch.mm(H, W_hh) + b_h)
+        H = torch.relu(torch.mm(X, W_xh) + torch.mm(H, W_hh) + b_h)
         Y = torch.mm(H, W_hq) + b_q
         outputs.append(Y)
     return torch.cat(outputs, dim=0), (H,)
@@ -116,11 +116,13 @@ def train_epoch_ch8(net, train_iter, loss, updater, device, use_random_iter):
         if isinstance(updater, torch.optim.Optimizer):
             updater.zero_grad()
             l.backward()
-            grad_clipping(net, 1)
+            # l.backward(retain_graph=True)
+            # grad_clipping(net, 1)
             updater.step()
         else:
             l.backward()
-            grad_clipping(net, 1)
+            # l.backward(retain_graph=True)
+            # grad_clipping(net, 1)
             # 因为已经调用了mean函数
             updater(batch_size=1)
         metric.add(l * y.numel(), y.numel())

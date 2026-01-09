@@ -40,7 +40,7 @@ def rnn(inputs, state, params):
     outputs = []
     # X的形状：(批量大小，词表大小)
     for X in inputs:
-        H = torch.tanh(torch.mm(X, W_xh) + torch.mm(H, W_hh) + b_h)
+        H = torch.relu(torch.mm(X, W_xh) + torch.mm(H, W_hh) + b_h)
         Y = torch.mm(H, W_hq) + b_q
         outputs.append(Y)
     return torch.cat(outputs, dim=0), (H,)
@@ -75,7 +75,11 @@ def predict_ch8(prefix, num_preds, net, vocab, device):  #@save
         outputs.append(vocab[y])
     for _ in range(num_preds):  # 预测num_preds步
         y, state = net(get_input(), state)
-        outputs.append(int(y.argmax(dim=1).reshape(1)))
+        # 使用multinomial采样
+        prob_y = F.softmax(y, dim=1)
+        index_y = torch.multinomial(prob_y, num_samples=1)
+        outputs.append(index_y.item())
+        # outputs.append(int(y.argmax(dim=1).reshape(1)))
     return ''.join([vocab.idx_to_token[i] for i in outputs])
 
 # res = predict_ch8('time traveller ', 10, net, vocab, mydl.try_gpu())
@@ -116,11 +120,11 @@ def train_epoch_ch8(net, train_iter, loss, updater, device, use_random_iter):
         if isinstance(updater, torch.optim.Optimizer):
             updater.zero_grad()
             l.backward()
-            grad_clipping(net, 1)
+            # grad_clipping(net, 1)
             updater.step()
         else:
             l.backward()
-            grad_clipping(net, 1)
+            # grad_clipping(net, 1)
             # 因为已经调用了mean函数
             updater(batch_size=1)
         metric.add(l * y.numel(), y.numel())

@@ -5,20 +5,29 @@ import torch
 from d2l import torch as d2l
 import re
 import collections
+import math
+from torch import nn
 
 d2l.DATA_HUB['time_machine'] = (d2l.DATA_URL + 'timemachine.txt',
                                 '090b5e7e70c295757f55df93cb0a180b9691891a')
 
-def read_time_machine():  #@save
+def read_text_file(data_source='time_machine'):  #@save
+    """将文本数据集加载到文本行的列表中
     
-    # with open('../data/war_of_the_worlds.txt', 'r') as f:
-    #     lines = f.readlines()
-    #     return [re.sub('[^A-Za-z]+', ' ', line).strip().lower() for line in lines]
-
-
-    """将时间机器数据集加载到文本行的列表中"""
-    with open(d2l.download('time_machine'), 'r') as f:
-        lines = f.readlines()
+    参数:
+        data_source: 数据源名称，支持 'time_machine' 或 'war_of_the_worlds'
+    """
+    if data_source == 'time_machine':
+        # 使用 d2l 下载的时间机器数据集
+        with open(d2l.download('time_machine'), 'r') as f:
+            lines = f.readlines()
+    elif data_source == 'war_of_the_worlds':
+        # 使用本地的 war_of_the_worlds.txt 文件
+        with open('../data/war_of_the_worlds.txt', 'r') as f:
+            lines = f.readlines()
+    else:
+        raise ValueError(f"不支持的数据源: {data_source}，请使用 'time_machine' 或 'war_of_the_worlds'")
+    
     return [re.sub('[^A-Za-z]+', ' ', line).strip().lower() for line in lines]
 
 
@@ -82,12 +91,17 @@ def tokenize(lines, token='word'):  #@save
     else:
         print('错误：未知词元类型：' + token)
 
-def load_corpus_time_machine(max_tokens=-1):  #@save
-    """返回时光机器数据集的词元索引列表和词表"""
-    lines = read_time_machine()
+def load_corpus(max_tokens=-1, data_source='time_machine'):  #@save
+    """返回数据集的词元索引列表和词表
+    
+    参数:
+        max_tokens: 最大词元数量，-1表示使用全部
+        data_source: 数据源名称，支持 'time_machine' 或 'war_of_the_worlds'
+    """
+    lines = read_text_file(data_source)
     tokens = tokenize(lines, 'char')
     vocab = Vocab(tokens)
-    # 因为时光机器数据集中的每个文本行不一定是一个句子或一个段落，
+    # 因为数据集中的每个文本行不一定是一个句子或一个段落，
     # 所以将所有文本行展平到一个列表中
     corpus = [vocab[token] for line in tokens for token in line]
     if max_tokens > 0:
@@ -137,23 +151,31 @@ def seq_data_iter_sequential(corpus, batch_size, num_steps):  #@save
         
 class SeqDataLoader:  #@save
     """加载序列数据的迭代器"""
-    def __init__(self, batch_size, num_steps, use_random_iter, max_tokens):
+    def __init__(self, batch_size, num_steps, use_random_iter, max_tokens, data_source='time_machine'):
         if use_random_iter:
             self.data_iter_fn = seq_data_iter_random
         else:
             self.data_iter_fn = seq_data_iter_sequential
-        self.corpus, self.vocab = load_corpus_time_machine(max_tokens)
+        self.corpus, self.vocab = load_corpus(max_tokens, data_source)
         self.batch_size, self.num_steps = batch_size, num_steps
 
     def __iter__(self):
         return self.data_iter_fn(self.corpus, self.batch_size, self.num_steps)
     
 
-def load_data_time_machine(batch_size, num_steps,  #@save
-                           use_random_iter=False, max_tokens=10000):
-    """返回时光机器数据集的迭代器和词表"""
+def load_data(batch_size, num_steps,  #@save
+                           use_random_iter=False, max_tokens=10000, data_source='time_machine'):
+    """返回数据集的迭代器和词表
+    
+    参数:
+        batch_size: 批次大小
+        num_steps: 序列长度
+        use_random_iter: 是否使用随机迭代
+        max_tokens: 最大词元数量
+        data_source: 数据源名称，支持 'time_machine' 或 'war_of_the_worlds'
+    """
     data_iter = SeqDataLoader(
-        batch_size, num_steps, use_random_iter, max_tokens)
+        batch_size, num_steps, use_random_iter, max_tokens, data_source)
     return data_iter, data_iter.vocab
 
 def try_gpu():
@@ -163,3 +185,86 @@ def try_gpu():
     if torch.backends.mps.is_available():
         return torch.device('mps')
     return torch.device('cpu')
+
+def predict_ch8(prefix, num_preds, net, vocab, device):  #@save
+    """在prefix后面生成新字符"""
+    state = net.begin_state(batch_size=1, device=device)
+    outputs = [vocab[prefix[0]]]
+    get_input = lambda: torch.tensor([outputs[-1]], device=device).reshape((1, 1))
+    for y in prefix[1:]:  # 预热期
+        _, state = net(get_input(), state)
+        outputs.append(vocab[y])
+    for _ in range(num_preds):  # 预测num_preds步
+        y, state = net(get_input(), state)
+        outputs.append(int(y.argmax(dim=1).reshape(1)))
+    return ''.join([vocab.idx_to_token[i] for i in outputs])
+
+def grad_clipping(net, theta):  #@save
+    """裁剪梯度"""
+    if isinstance(net, nn.Module):
+        params = [p for p in net.parameters() if p.requires_grad]
+    else:
+        params = net.params
+    norm = torch.sqrt(sum(torch.sum((p.grad ** 2)) for p in params))
+    if norm > theta:
+        for param in params:
+            param.grad[:] *= theta / norm
+
+def train_epoch_ch8(net, train_iter, loss, updater, device, use_random_iter):
+    """训练网络一个迭代周期（定义见第8章）"""
+    state, timer = None, d2l.Timer()
+    metric = d2l.Accumulator(2)  # 训练损失之和,词元数量
+    for X, Y in train_iter:
+        if state is None or use_random_iter:
+            # 在第一次迭代或使用随机抽样时初始化state
+            state = net.begin_state(batch_size=X.shape[0], device=device)
+        else:
+            if isinstance(net, nn.Module) and not isinstance(state, tuple):
+                # state对于nn.GRU是个张量
+                state.detach_()
+            else:
+                # state对于nn.LSTM或对于我们从零开始实现的模型是个张量
+                for s in state:
+                    s.detach_()
+        y = Y.T.reshape(-1)
+        X, y = X.to(device), y.to(device)
+        y_hat, state = net(X, state)
+        l = loss(y_hat, y.long()).mean()
+        if isinstance(updater, torch.optim.Optimizer):
+            updater.zero_grad()
+            l.backward()
+            grad_clipping(net, 1)
+            updater.step()
+        else:
+            l.backward()
+            grad_clipping(net, 1)
+            # 因为已经调用了mean函数
+            updater(batch_size=1)
+        metric.add(l * y.numel(), y.numel())
+    return math.exp(metric[0] / metric[1]), metric[1] / timer.stop()
+
+def train_ch8(net, train_iter, vocab, lr, num_epochs, device,
+              use_random_iter=False):
+    """训练模型（定义见第8章）"""
+    loss = nn.CrossEntropyLoss()
+    animator = d2l.Animator(xlabel='epoch', ylabel='perplexity',
+                            legend=['train'], xlim=[10, num_epochs])
+    # 初始化
+    if isinstance(net, nn.Module):
+        updater = torch.optim.SGD(net.parameters(), lr)
+    else:
+        updater = lambda batch_size: d2l.sgd(net.params, lr, batch_size)
+    predict = lambda prefix: predict_ch8(prefix, 50, net, vocab, device)
+    # 训练和预测
+    for epoch in range(num_epochs):
+        ppl, speed = train_epoch_ch8(
+            net, train_iter, loss, updater, device, use_random_iter)
+        if (epoch + 1) % 10 == 0:
+            print(predict('time traveller'))
+            animator.add(epoch + 1, [ppl])
+    print(f'困惑度 {ppl:.1f}, {speed:.1f} 词元/秒 {str(device)}')
+    print(predict('time traveller'))
+    print(predict('traveller'))
+    print(predict('professor simon newcomb was expounding'))
+    print(predict('the psychologist seemed about'))
+    print(predict('hello world'))

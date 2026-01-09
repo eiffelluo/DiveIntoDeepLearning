@@ -116,11 +116,11 @@ def train_epoch_ch8(net, train_iter, loss, updater, device, use_random_iter):
         if isinstance(updater, torch.optim.Optimizer):
             updater.zero_grad()
             l.backward()
-            grad_clipping(net, 1)
+            # grad_clipping(net, 1)
             updater.step()
         else:
             l.backward()
-            grad_clipping(net, 1)
+            # grad_clipping(net, 1)
             # 因为已经调用了mean函数
             updater(batch_size=1)
         metric.add(l * y.numel(), y.numel())
