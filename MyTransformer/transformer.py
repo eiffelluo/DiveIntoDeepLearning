@@ -1,22 +1,36 @@
 import torch
 import torch.nn as nn
 import dataloader
+import pos_encoder
 
 class EncoderDecoder(nn.Module):
     def __init__(self):
         super().__init__()
 
 
+class EncodeBlock(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward(self,X,X_valid_len):
+        pass
+
+
 class TransformerEncoder(nn.Module):
-    def __init__(self,num_embeddings,embedding_dim):
+    def __init__(self,num_step,num_embeddings,embedding_dim,blk_num,**kwargs):
         super().__init__()
         # 创建 Embedding 层
         # num_embeddings: 词汇表大小
         # embedding_dim: 嵌入维度
         self.embedding = nn.Embedding(num_embeddings=num_embeddings, embedding_dim=embedding_dim)
+        self.posEncoder = pos_encoder.PosEncoder(embedding_dim,num_step)
+        self.blks = []
+        
 
     def forward(self,X,X_valid_len):
-        embed_X = self.embedding(X)
+        embedX = self.embedding(X)
+        posX = self.posEncoder(X)
+        
 
 
 
