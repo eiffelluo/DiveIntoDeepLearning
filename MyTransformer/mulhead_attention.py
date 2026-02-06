@@ -7,9 +7,12 @@ MIN_NUM = -20
 def masked_softmax(X, valid_lens):
     if(valid_lens == None):
         return torch.softmax(X,dim=-1)
-    if(len(valid_lens.shape) == 1 ):
-        X[:,]
-    X[indices] = MIN_NUM
+    shape = X.shape
+    if valid_lens.dim() == 1 :
+        tmp_valid_lens = torch.repeat_interleave(valid_lens,shape[1])
+    if valid_lens.dim() == 2 :
+        tmp_valid_lens = valid_lens.reshape(-1)
+  
     print(X)
 
 
