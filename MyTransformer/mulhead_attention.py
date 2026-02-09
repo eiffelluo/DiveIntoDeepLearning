@@ -2,8 +2,22 @@ import torch
 import torch.nn as nn
 import math
 
-MIN_NUM = -20
+torch.set_printoptions(sci_mode=False)  # 禁用科学计数法
 
+
+# X.shape (num_size,dim)
+
+def sequence_mask(X, valid_len, value=0):
+    dim = X.size(1)
+    new_X = torch.arange(dim,device=X.device)[None,:]
+    new_valid_len = valid_len[:,None]
+    mask = new_X < new_valid_len
+    X[~mask] = value
+    return X
+
+
+
+# X.shape (batch_size,num_size,dim)
 def masked_softmax(X, valid_lens):
     if(valid_lens == None):
         return torch.softmax(X,dim=-1)
@@ -13,13 +27,15 @@ def masked_softmax(X, valid_lens):
     if valid_lens.dim() == 2 :
         tmp_valid_lens = valid_lens.reshape(-1)
   
-    print(X)
+    X = sequence_mask(X.reshape(-1, shape[-1]), tmp_valid_lens,value=-1e6)
+    return torch.softmax(X.reshape(shape),dim=-1)
 
 
 class DotProductAttention(nn.Module):
     """缩放点积注意力"""
-    def __init__(self):
-        super(DotProductAttention, self).__init__()
+    def __init__(self, dropout, **kwargs):
+        super(DotProductAttention, self).__init__(**kwargs)
+        self.dropout = nn.Dropout(dropout)
 
     # queries的形状：(batch_size，查询的个数，d)
     # keys的形状：(batch_size，“键－值”对的个数，d)
@@ -29,7 +45,10 @@ class DotProductAttention(nn.Module):
         d = query.shape[-1]
         score = torch.bmm(query,key.transpose(1,2))/math.sqrt(d)
         attention_w = masked_softmax(score,valid_lens)
-        attention = torch.bmm(attention_w,value)
+        print(attention_w)
+        dropout_attention_w = self.dropout(attention_w)
+        print(dropout_attention_w)
+        attention = torch.bmm(dropout_attention_w,value)
         return attention
       
 
@@ -38,35 +57,49 @@ class MulHeadAttention(nn.Module):
         super().__init__()
         self.num_head = num_head
         self.o_dim = o_dim
-        self.qLiner = nn.Linear(q_dim,o_dim)
-        self.kLiner = nn.Linear(k_dim,o_dim)
-        self.vLiner = nn.Linear(v_dim,o_dim)
+        self.qLiners = []
+        self.kLiners = []
+        self.vLiners = []
+        for i in range(num_head):
+            qLiner = nn.Linear(q_dim,o_dim)
+            kLiner = nn.Linear(k_dim,o_dim)
+            vLiner = nn.Linear(v_dim,o_dim)
+            self.qLiners.append(qLiner)
+            self.kLiners.append(kLiner)
+            self.vLiners.append(vLiner)
         self.liner = nn.Linear(o_dim,dim)
+        self.attention = DotProductAttention(dropout=0.5)
 
     def forward(self,query,key,value):
-        q = self.qLiner(query)
-        k = self.kLiner(key)
-        v = self.vLiner(value)
-        score = torch.bmm(q,k.transpose(1,2))/math.sqrt(self.o_dim)
-        attention_w = torch.softmax(score,dim=-1)
-        attention = torch.bmm(attention_w,value)
-        return attention
+        pass
+      
 
 
+
+def test_dot_product_attention():
+    queries, keys = torch.normal(0, 1, (2, 1, 20)), torch.ones((2, 10, 2))
+    # values的小批量，两个值矩阵是相同的
+    values = torch.arange(40, dtype=torch.float32).reshape(1, 10, 4).repeat(2, 1, 1)
+    valid_lens = torch.tensor([2, 6])
+
+    queries = torch.normal(0, 1, (2, 1, 2))
+    attention = DotProductAttention(dropout=0.5)
+    attention.eval()
+    print(attention(queries, keys, values, valid_lens))
 
 def main():
     mh = MulHeadAttention(1,3,3,1,2,2)
     query = torch.tensor([
         [
-            [1,2,3],
-            [2,3,4]
+            [1,0,1],
+            [1,2,3]
         ]
     ],dtype=torch.float)
 
     key = torch.tensor([
         [
-            [1,0,1],
-            [1,1,1],
+            [-1,0,1],
+            [1,2,3],
         ]
     ],dtype=torch.float)
 
@@ -79,7 +112,21 @@ def main():
         ],dtype=torch.float
     )
 
-    attention = mh(query,key,value)
-    print(attention)
+    dpa = DotProductAttention(0.25)
+    print(dpa(query,key,value))
 
-main()
+    # attention = mh(query,key,value)
+    # print(attention)
+    # X = torch.rand(2, 2, 4)
+    # print(X)
+    # print(masked_softmax(X,torch.tensor([2, 3])))
+    
+    # print('----------------')
+
+    # X = torch.rand(2, 2, 4)
+    # print(X)
+    # print(masked_softmax(X,torch.tensor([[1, 3], [2, 4]])))
+    
+
+# main()
+test_dot_product_attention()
