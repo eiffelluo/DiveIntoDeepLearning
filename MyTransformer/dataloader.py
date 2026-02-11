@@ -51,9 +51,9 @@ class Vocab:  #@save
         for i in range(len(self._idx2tokens)):
             self._tokens2idx[self._idx2tokens[i]] = i
 
-        print(self._tokens2freq)
-        print(self._idx2tokens)
-        print(self._tokens2idx)
+        # print(self._tokens2freq)
+        # print(self._idx2tokens)
+        # print(self._tokens2idx)
 
     def __len__(self):
         return len(self._idx2tokens)
@@ -158,4 +158,4 @@ def main():
        
 
 
-main()
+# main()

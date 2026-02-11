@@ -30,4 +30,4 @@ def main():
     fn = FeatureNorm()
     print(fn(X))
 
-main()
+# main()
