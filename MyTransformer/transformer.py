@@ -116,22 +116,31 @@ class DecoderBlock(nn.Module):
                  ffn_num_input, ffn_num_hiddens, num_heads,
                  dropout, i, **kwargs):
         super(DecoderBlock, self).__init__(**kwargs)
-
+        #自注意力
+        self.decoderAttention = mulhead_attention.MultiHeadAttention(query_size, key_size,value_size, num_hiddens,num_heads)
+        self.decoderAddition = add_norm.Add()
+        self.decoderNorm = add_norm.FeatureNorm()
+        
+        # 下面这段逻辑和编码器一样
         self.mAttention = mulhead_attention.MultiHeadAttention(query_size, key_size,value_size, num_hiddens,num_heads)
         self.addition = add_norm.Add()
         self.norm = add_norm.FeatureNorm()
         self.ffn = position_wise_ffn.PositionWiseFFN(ffn_num_input, ffn_num_hiddens, num_hiddens)
         self.addition2 = add_norm.Add(dropout)
         self.norm2 = add_norm.FeatureNorm()
+      
 
-    def forward(self,X,X_valid_len):
+    def forward(self,X,X_valid_len,state):
+        enc_outputs, enc_valid_lens = state[0], state[1]
         num_step = X.shape[1]
         # 掩蔽一行当前token后面的token
-        valid_len = create_sequence_matrix_vectorized(X_valid_len, num_step)
+        valid_len = create_sequence_matrix_vectorized(X_valid_len, num_step,X.device)
         # valid_len2 = create_dec_valid_lens(X.shape[0],num_step,X.device)
-        Y = self.norm(self.addition(X,self.mAttention(X,X,X,valid_len)))
-        return self.norm2(self.addition2(Y,self.ffn(Y)))
-
+        Y = self.decoderNorm(self.decoderAddition(X,self.decoderAttention(X,X,X,valid_len)))
+      
+        Y2 = self.norm(self.addition(Y,self.mAttention(Y,enc_outputs,enc_outputs,enc_valid_lens)))
+        return self.norm2(self.addition2(Y2,self.ffn(Y2)))
+    
 
 class TransformerDecoder(AttentionDecoder):
     def __init__(self, vocab_size, key_size, query_size, value_size,
@@ -155,10 +164,10 @@ class TransformerDecoder(AttentionDecoder):
         raise NotImplementedError
     
 
-    def forward(self,X,X_valid_len):
+    def forward(self,X,X_valid_len,state):
         X = self.posEncoder(self.embedding(X))
         for i, blk in enumerate(self.blks):
-            X = blk(X,X_valid_len)
+            X = blk(X,X_valid_len,state)
         return X
 
 
@@ -200,9 +209,9 @@ def main():
     
     for batch in data_iter:
         X, X_valid_len, Y, Y_valid_len = batch
-        # output = encoder(X,X_valid_len)
-        # print(output)
-        output2 = decoder(Y,Y_valid_len)
+        enc_output = encoder(X,X_valid_len)
+        print(enc_output)
+        output2 = decoder(Y,Y_valid_len,(enc_output,X_valid_len))
         print(output2)
 
 
