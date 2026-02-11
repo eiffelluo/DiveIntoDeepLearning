@@ -17,7 +17,7 @@ def sequence_mask(X, valid_len, value=0):
 
 
 
-# X.shape (batch_size,num_size,dim)
+# X.shape (batch_size,num_step,dim)
 def masked_softmax(X, valid_lens):
     if(valid_lens == None):
         return torch.softmax(X,dim=-1)
@@ -45,34 +45,143 @@ class DotProductAttention(nn.Module):
         d = query.shape[-1]
         score = torch.bmm(query,key.transpose(1,2))/math.sqrt(d)
         attention_w = masked_softmax(score,valid_lens)
-        print(attention_w)
         dropout_attention_w = self.dropout(attention_w)
-        print(dropout_attention_w)
         attention = torch.bmm(dropout_attention_w,value)
+        self.attention_weights = dropout_attention_w
         return attention
       
 
+# 原始/教学版 多头注意力 每个 head 真的当成一个独立的小注意力
 class MulHeadAttention(nn.Module):
-    def __init__(self,num_head,q_dim,k_dim,v_dim,o_dim,dim):
-        super().__init__()
-        self.num_head = num_head
-        self.o_dim = o_dim
+    def __init__(self,num_heads,d_model,query_size, key_size,value_size,num_hiddens,**kwargs):
+        super().__init__(**kwargs)
+        self.num_heads = num_heads
+        self.d_head = d_model // num_heads
+        self.num_hiddens = num_hiddens
         self.qLiners = []
         self.kLiners = []
         self.vLiners = []
-        for i in range(num_head):
-            qLiner = nn.Linear(q_dim,o_dim)
-            kLiner = nn.Linear(k_dim,o_dim)
-            vLiner = nn.Linear(v_dim,o_dim)
-            self.qLiners.append(qLiner)
-            self.kLiners.append(kLiner)
-            self.vLiners.append(vLiner)
-        self.liner = nn.Linear(o_dim,dim)
-        self.attention = DotProductAttention(dropout=0.5)
+        # for i in range(num_heads):
+        #     qLiner = nn.Linear(query_size, self.d_head)
+        #     kLiner = nn.Linear(key_size, self.d_head)
+        #     vLiner = nn.Linear(value_size, self.d_head)
+        #     self.qLiners.append(qLiner)
+        #     self.kLiners.append(kLiner)
+        #     self.vLiners.append(vLiner)
 
-    def forward(self,query,key,value):
-        pass
-      
+
+        self.qLiners = nn.ModuleList([
+            nn.Linear(query_size, self.d_head) for _ in range(num_head)
+        ])
+        self.kLiners = nn.ModuleList([
+            nn.Linear(key_size, self.d_head) for _ in range(num_head)
+        ])
+        self.vLiners = nn.ModuleList([
+            nn.Linear(value_size, self.d_head) for _ in range(num_head)
+        ])
+
+        self.liner = nn.Linear(d_model,num_hiddens)
+        self.attention = DotProductAttention(dropout=0)
+
+    # queries的形状：(batch_size，查询的个数，d)
+    def forward(self,query,key,value,valid_lens=None):
+        head_outputs = []
+        head_attentions = []
+        for i in range(self.num_heads):
+            q = self.qLiners[i](query)
+            k = self.kLiners[i](key)
+            v = self.vLiners[i](value)
+            out_i = self.attention(q,k,v,valid_lens)
+            attn_i = self.attention.attention_weights
+            head_outputs.append(out_i)
+            head_attentions.append(attn_i)
+
+        concat = torch.concat(head_outputs,dim=-1)
+        output = self.liner(concat)
+        # print('output ----------')
+        print(output)
+        # print('head_attentions --------')
+        print(head_attentions)
+        return output
+
+# 我的实现
+# X 输入shape (batch_size，查询或者“键－值”对的个数，num_hiddens)
+# 输出 shape (batch_size * num_heads ,查询或者“键－值”对的个数, num_hiddens // num_heads  )
+def transpose_qkv(X, num_heads):
+    shape = X.shape
+    # 此时X shape (batch_size  ,查询或者“键－值”对的个数, num_heads, num_hiddens // num_heads  )
+    X = X.reshape(shape[0],shape[1],-1,shape[2] // num_heads )
+    # 此时X shape (batch_size  ,num_heads,查询或者“键－值”对的个数, num_hiddens // num_heads  )
+    X = torch.transpose(X,1,2)
+    # 此时 X shape (batch_size * num_heads ,查询或者“键－值”对的个数, num_hiddens // num_heads  )
+    X = X.reshape(-1,shape[1],shape[2] // num_heads)
+    return X
+
+# 书中实现
+def transpose_qkv2(X, num_heads):
+    """为了多注意力头的并行计算而变换形状"""
+    # 输入X的形状:(batch_size，查询或者“键－值”对的个数，num_hiddens)
+    # 输出X的形状:(batch_size，查询或者“键－值”对的个数，num_heads，
+    # num_hiddens/num_heads)
+    X = X.reshape(X.shape[0], X.shape[1], num_heads, -1)
+
+    # 输出X的形状:(batch_size，num_heads，查询或者“键－值”对的个数,
+    # num_hiddens/num_heads)
+    X = X.permute(0, 2, 1, 3)
+
+    # 最终输出的形状:(batch_size*num_heads,查询或者“键－值”对的个数,
+    # num_hiddens/num_heads)
+    return X.reshape(-1, X.shape[2], X.shape[3])
+
+# 输入 X shape (batch_size * num_heads ,查询或者“键－值”对的个数, num_hiddens // num_heads  )
+# 输出 shape (batch_size，查询或者“键－值”对的个数，num_hiddens)
+def transpose_output(X, num_heads):
+    # 此时 X shape (batch_size , num_heads ,查询或者“键－值”对的个数, num_hiddens // num_heads  )
+    X = X.reshape(-1,num_heads,X.shape[1],X.shape[2])
+    # 此时 X shape (batch_size ,查询或者“键－值”对的个数,num_heads , num_hiddens // num_heads  )
+    X = torch.transpose(X,1,2)
+    X = X.reshape(X.shape[0],X.shape[1],-1)
+    return X
+
+
+# 工程优化后的多头注意力   
+class MultiHeadAttention(nn.Module):
+    """多头注意力"""
+    def __init__(self,  query_size, key_size,value_size, num_hiddens,
+                 num_heads, dropout=0, bias=False, **kwargs):
+        super(MultiHeadAttention, self).__init__(**kwargs)
+        self.num_heads = num_heads
+        self.W_q = nn.Linear(query_size,num_hiddens,bias=bias)
+        self.W_k = nn.Linear(key_size,num_hiddens,bias=bias)
+        self.W_v = nn.Linear(value_size,num_hiddens,bias=bias)
+        self.W_o = nn.Linear(num_hiddens,num_hiddens,bias=bias)
+        self.attention = DotProductAttention(dropout)
+
+     # queries，keys，values的形状:# (batch_size，查询或者“键－值”对的个数，num_hiddens)
+    def forward(self,query,key,value,valid_lens=None):
+        q = transpose_qkv(self.W_q(query),self.num_heads)
+        k = transpose_qkv(self.W_k(key),self.num_heads)
+        v = transpose_qkv(self.W_v(value),self.num_heads)
+
+        head_attention  = self.attention(q,k,v,valid_lens)
+        # head_attention_weight = self.attention.attention_weights
+        # print('head_attention_weight -------')
+        # print(head_attention_weight)
+
+        attention = transpose_output(head_attention,self.num_heads)
+        # print('attention ------------')
+        print(attention)
+        # attention_weight = transpose_output(head_attention_weight,self.num_heads)
+        # print('attention_weight ------')
+        # print(attention_weight)
+        output = self.W_o(attention)
+        # print('output  ---------')
+        # print(output)
+        return output
+
+
+
+    
 
 
 
@@ -128,5 +237,39 @@ def main():
     # print(masked_softmax(X,torch.tensor([[1, 3], [2, 4]])))
     
 
+def testMulHeadAttention():
+    X = torch.randn(2, 3, 4)
+    mh = MulHeadAttention(num_head = 2,q_dim=4,k_dim=4,v_dim =4,num_hiddens=2)
+    output,head_attentions = mh(X,X,X)
+    print(output)
+    print('-------------')
+    print(head_attentions)
+
+def testMulHeadAttention2():
+    q = torch.randn(2, 3, 4)
+    k = torch.randn(2,5,3)
+    v = torch.randn(2,5,8)
+    # mh = MulHeadAttention(num_heads = 2,query_size=4,key_size=3,value_size =8,num_hiddens=2,d_model=4)
+    mh = MultiHeadAttention(num_heads = 2,query_size=4,key_size=3,value_size =8,num_hiddens=2)
+    output,attention_weight = mh(q,k,v,valid_lens=torch.tensor([[1, 2,3], [1,2, 4]]))
+   
+
+def testTranspose_qkv():
+    X = torch.arange(24).reshape(2,3,4)
+    print(X)
+    res = transpose_qkv(X,2)
+    print(res.shape)
+    print(res)
+    Y = transpose_output(res,2)
+    print(Y)
+
+    # res2 = transpose_qkv2(X,2)
+    # print(res2.shape)
+    # print(res2)
+
+
+
 # main()
-test_dot_product_attention()
+# test_dot_product_attention()
+# testMulHeadAttention2()
+# testTranspose_qkv()
