@@ -71,13 +71,13 @@ class MulHeadAttention(nn.Module):
 
 
         self.qLiners = nn.ModuleList([
-            nn.Linear(query_size, self.d_head) for _ in range(num_head)
+            nn.Linear(query_size, self.d_head) for _ in range(num_heads)
         ])
         self.kLiners = nn.ModuleList([
-            nn.Linear(key_size, self.d_head) for _ in range(num_head)
+            nn.Linear(key_size, self.d_head) for _ in range(num_heads)
         ])
         self.vLiners = nn.ModuleList([
-            nn.Linear(value_size, self.d_head) for _ in range(num_head)
+            nn.Linear(value_size, self.d_head) for _ in range(num_heads)
         ])
 
         self.liner = nn.Linear(d_model,num_hiddens)
@@ -99,9 +99,9 @@ class MulHeadAttention(nn.Module):
         concat = torch.concat(head_outputs,dim=-1)
         output = self.liner(concat)
         # print('output ----------')
-        print(output)
+        # print(output)
         # print('head_attentions --------')
-        print(head_attentions)
+        # print(head_attentions)
         return output
 
 # 我的实现
@@ -163,6 +163,8 @@ class MultiHeadAttention(nn.Module):
         k = transpose_qkv(self.W_k(key),self.num_heads)
         v = transpose_qkv(self.W_v(value),self.num_heads)
 
+        if(valid_lens != None):
+            valid_lens = torch.repeat_interleave(valid_lens,self.num_heads,dim=0)
         head_attention  = self.attention(q,k,v,valid_lens)
         # head_attention_weight = self.attention.attention_weights
         # print('head_attention_weight -------')
@@ -170,7 +172,7 @@ class MultiHeadAttention(nn.Module):
 
         attention = transpose_output(head_attention,self.num_heads)
         # print('attention ------------')
-        print(attention)
+        # print(attention)
         # attention_weight = transpose_output(head_attention_weight,self.num_heads)
         # print('attention_weight ------')
         # print(attention_weight)

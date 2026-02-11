@@ -53,8 +53,9 @@ class EncodeBlock(nn.Module):
                 dropout, use_bias=False, **kwargs):
         super().__init__(**kwargs)
         
-        # self.mAttention = mulhead_attention.MultiHeadAttention(query_size, key_size,value_size, num_hiddens,num_heads)
-        self.mAttention = mulhead_attention.DotProductAttention(0)
+        self.mAttention = mulhead_attention.MultiHeadAttention(query_size, key_size,value_size, num_hiddens,num_heads)
+        # self.mAttention = mulhead_attention.MulHeadAttention(num_heads,num_hiddens,query_size, key_size,value_size, num_hiddens)
+        # self.mAttention = mulhead_attention.DotProductAttention(0)
         self.addition = add_norm.Add()
         self.norm = add_norm.FeatureNorm()
         self.ffn = position_wise_ffn.PositionWiseFFN(ffn_num_input, ffn_num_hiddens, num_hiddens)
