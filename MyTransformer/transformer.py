@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+import torch.optim as optim
+from d2l import torch as d2l
 import dataloader
 import pos_encoder
 import mulhead_attention
@@ -24,6 +26,22 @@ def create_dec_valid_lens(batch_size,num_steps,device):
     dec_valid_lens = torch.arange(
         1, num_steps + 1, device=device).repeat(batch_size, 1)
     return dec_valid_lens
+
+class MaskedSoftmaxCELoss(nn.CrossEntropyLoss):
+    """带遮蔽的softmax交叉熵损失函数"""
+    # pred的形状：(batch_size,num_steps,vocab_size)
+    # label的形状：(batch_size,num_steps)
+    # valid_len的形状：(batch_size,)
+    def forward(self, pred, label, valid_len):
+        weight = torch.ones_like(label)
+        masked_weight = mulhead_attention.sequence_mask(weight, valid_len)
+        # print(masked_weight)
+        self.reduction='none'
+        unweighted_loss = super(MaskedSoftmaxCELoss, self).forward(pred.permute(0, 2, 1), label)
+        weighted_loss = (unweighted_loss * masked_weight).mean(dim=1)
+        return weighted_loss
+        
+        
 
 class Encoder(nn.Module):
     """The base encoder interface for the encoder--decoder architecture.
@@ -62,8 +80,18 @@ class AttentionDecoder(Decoder):
         raise NotImplementedError
 
 class EncoderDecoder(nn.Module):
-    def __init__(self):
+    def __init__(self,encoder, decoder):
         super().__init__()
+        self.encoder = encoder
+        self.decoder = decoder
+
+    def forward(self,X,X_valid_len, Y, Y_valid_len):
+        enc_output = self.encoder(X,X_valid_len)
+        # print(enc_output)
+        output2 = self.decoder(Y,Y_valid_len,(enc_output,X_valid_len))
+        # print(output2)
+        return output2
+
 
 
 class EncodeBlock(nn.Module):
@@ -155,6 +183,8 @@ class TransformerDecoder(AttentionDecoder):
         self.posEncoder = pos_encoder.PosEncoder(num_hiddens,dropout)
         self.blks = nn.Sequential()
 
+        self.mlp = nn.Linear(num_hiddens,vocab_size)
+
         for i in range(num_layers):
             self.blks.add_module('block'+str(i),DecoderBlock(key_size, query_size, value_size,num_hiddens,
             ffn_num_input, ffn_num_hiddens,num_heads, dropout,i))
@@ -168,13 +198,35 @@ class TransformerDecoder(AttentionDecoder):
         X = self.posEncoder(self.embedding(X))
         for i, blk in enumerate(self.blks):
             X = blk(X,X_valid_len,state)
-        return X
+        
+        return self.mlp(X)
 
+def train_seq2seq(net, train_iter, lr, num_epochs, tgt_vocab, device):
+    optimizer = optim.SGD(net.parameters(), lr=lr)  # 优化器
+    for epoch in range(num_epochs):
+        loss = MaskedSoftmaxCELoss()
+        for batch in train_iter:
+            X, X_valid_len, Y, Y_valid_len = batch
+            Y_hat = net(X, X_valid_len, Y, Y_valid_len)
+            l = loss(Y_hat,Y,Y_valid_len)
+            print(l)
+
+            # 反向传播
+            optimizer.zero_grad()  # 清空梯度
+            l.sum().backward()        # 计算梯度
+            optimizer.step()      # 更新参数
+
+def predict_seq2seq(net, src_sentence, src_vocab, tgt_vocab, num_steps,
+                    device, save_attention_weights=False):  
+    pass
 
 def main():
+    device = d2l.try_gpu()
+    num_epochs = 10
+    lr = 0.01
     batch_size = 5
     num_step = 10
-    data_iter, src_vocab, tgt_vocab = dataloader.load_data_nmt(batch_size,num_step)
+    train_iter, src_vocab, tgt_vocab = dataloader.load_data_nmt(batch_size,num_step)
     src_vocab_size = len(src_vocab)
     rgt_vocab_size = len(tgt_vocab)
     num_hiddens = 4
@@ -207,12 +259,9 @@ def main():
                                 num_layers=num_layers, 
                                 dropout=dropout)
     
-    for batch in data_iter:
-        X, X_valid_len, Y, Y_valid_len = batch
-        enc_output = encoder(X,X_valid_len)
-        print(enc_output)
-        output2 = decoder(Y,Y_valid_len,(enc_output,X_valid_len))
-        print(output2)
+    net = EncoderDecoder(encoder, decoder)
+
+    train_seq2seq(net, train_iter, lr, num_epochs, tgt_vocab, device)
 
 
 

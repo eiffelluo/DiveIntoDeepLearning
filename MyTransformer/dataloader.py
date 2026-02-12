@@ -99,7 +99,7 @@ class DataIterator:
         self.batch_size = batch_size
     
     def __iter__(self):
-        print("MyIterator.__iter__ 被调用：返回自身")
+        # print("MyIterator.__iter__ 被调用：返回自身")
         return self
     
     def __next__(self):
@@ -120,7 +120,7 @@ def load_array(data_arrays,batch_size):
     return iter
 
       
-def load_data_nmt(batch_size, num_steps, num_examples=600):
+def load_data_nmt(batch_size, num_steps, num_examples=6000):
     text = preprocess_nmt(read_data_nmt())
     source, target = tokenize_nmt(text, num_examples)
     src_vocab = Vocab(source, min_freq=1, reserved_tokens=['<pad>', '<bos>', '<eos>'])

@@ -13,7 +13,7 @@ def init_weights(m):
     if type(m) == nn.Linear:
         nn.init.normal_(m.weight, std=0.01)
 
-net.apply(init_weights);
+net.apply(init_weights)
 
 # loss = nn.CrossEntropyLoss(reduction='none')
 lr = 0.1
