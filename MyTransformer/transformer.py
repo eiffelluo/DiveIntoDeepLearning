@@ -88,9 +88,10 @@ class EncoderDecoder(nn.Module):
     def forward(self,X,X_valid_len, Y, Y_valid_len):
         enc_output = self.encoder(X,X_valid_len)
         # print(enc_output)
-        output2 = self.decoder(Y,Y_valid_len,(enc_output,X_valid_len))
-        # print(output2)
-        return output2
+        state = self.decoder.init_state(enc_output,X_valid_len)
+        dec_output = self.decoder(Y,Y_valid_len,state)
+        # print(dec_output)
+        return dec_output
 
 
 
@@ -144,6 +145,7 @@ class DecoderBlock(nn.Module):
                  ffn_num_input, ffn_num_hiddens, num_heads,
                  dropout, i, **kwargs):
         super(DecoderBlock, self).__init__(**kwargs)
+        self.i = i
         #自注意力
         self.decoderAttention = mulhead_attention.MultiHeadAttention(query_size, key_size,value_size, num_hiddens,num_heads)
         self.decoderAddition = add_norm.Add()
@@ -161,10 +163,18 @@ class DecoderBlock(nn.Module):
     def forward(self,X,X_valid_len,state):
         enc_outputs, enc_valid_lens = state[0], state[1]
         num_step = X.shape[1]
-        # 掩蔽一行当前token后面的token
-        valid_len = create_sequence_matrix_vectorized(X_valid_len, num_step,X.device)
+        if state[2][self.i] == None:
+            # 训练阶段一直为None,预测阶段当前block第0个token 为None
+            key_values = X
+        else:
+            key_values = torch.cat(state[2][self.i],X,dim=1)
+        
+       
+        # 训练模式 掩蔽一行当前token后面的token
+        valid_len = create_sequence_matrix_vectorized(X_valid_len, num_step,X.device) if self.training else  None
+    
         # valid_len2 = create_dec_valid_lens(X.shape[0],num_step,X.device)
-        Y = self.decoderNorm(self.decoderAddition(X,self.decoderAttention(X,X,X,valid_len)))
+        Y = self.decoderNorm(self.decoderAddition(X,self.decoderAttention(X,key_values,key_values,valid_len)))
       
         Y2 = self.norm(self.addition(Y,self.mAttention(Y,enc_outputs,enc_outputs,enc_valid_lens)))
         return self.norm2(self.addition2(Y2,self.ffn(Y2)))
@@ -193,6 +203,9 @@ class TransformerDecoder(AttentionDecoder):
     def attention_weights(self):
         raise NotImplementedError
     
+    def init_state(self, enc_outputs, enc_valid_lens, *args):
+        return (enc_outputs,enc_valid_lens,[None] * self.num_layers)
+    
 
     def forward(self,X,X_valid_len,state):
         X = self.posEncoder(self.embedding(X))
@@ -202,14 +215,17 @@ class TransformerDecoder(AttentionDecoder):
         return self.mlp(X)
 
 def train_seq2seq(net, train_iter, lr, num_epochs, tgt_vocab, device):
+    net.train()
     optimizer = optim.SGD(net.parameters(), lr=lr)  # 优化器
     for epoch in range(num_epochs):
         loss = MaskedSoftmaxCELoss()
         for batch in train_iter:
             X, X_valid_len, Y, Y_valid_len = batch
-            Y_hat = net(X, X_valid_len, Y, Y_valid_len)
+            bos = torch.full((Y.shape[0],1), tgt_vocab['<bos>'])
+            train_Y = torch.cat([bos,Y[:,:-1]],dim=-1)
+            Y_hat = net(X, X_valid_len, train_Y, Y_valid_len)
             l = loss(Y_hat,Y,Y_valid_len)
-            print(l)
+            # print(l)
 
             # 反向传播
             optimizer.zero_grad()  # 清空梯度
@@ -218,7 +234,36 @@ def train_seq2seq(net, train_iter, lr, num_epochs, tgt_vocab, device):
 
 def predict_seq2seq(net, src_sentence, src_vocab, tgt_vocab, num_steps,
                     device, save_attention_weights=False):  
-    pass
+    net.eval()
+    src_words = src_sentence.lower().split(' ')
+    src_tokens = src_vocab[src_words]+ [src_vocab['<eos>']]
+    src_pad_tokens = torch.tensor(dataloader.truncate_pad(src_tokens, num_steps, src_vocab['<pad>']))
+    valid_len = (src_pad_tokens != src_vocab['<pad>']).type(torch.int32).sum()
+    enc_valid_len = valid_len.reshape(1)
+    print('src_tokens ',src_tokens)
+    enc_input = torch.unsqueeze(src_pad_tokens, dim=0)
+
+    enc_output = net.encoder(enc_input,enc_valid_len)
+    state = net.decoder.init_state(enc_output,enc_valid_len)
+
+    dec_input = torch.tensor([tgt_vocab['<bos>']]).reshape(1,1)
+    dec_valid_len = torch.tensor([1])
+    output_tokens=['<bos>']
+
+    for i in range(1,num_steps):
+        Y_hat = net.decoder(dec_input,dec_valid_len,state)
+        _,max_idx = Y_hat.max(dim = -1)
+        # print(max_idx)
+        token = tgt_vocab.to_tokens(max_idx)
+        # print(token)
+        output_tokens.append(token)
+        dec_input = torch.tensor([max_idx]).reshape(1,1)
+        if token == '<eos>':
+            break
+ 
+    return ''.join(output_tokens),None
+
+    
 
 def main():
     device = d2l.try_gpu()
@@ -262,6 +307,15 @@ def main():
     net = EncoderDecoder(encoder, decoder)
 
     train_seq2seq(net, train_iter, lr, num_epochs, tgt_vocab, device)
+
+    engs = ['go .', "i lost .", 'he\'s calm .', 'i\'m home .']
+    fras = ['va !', 'j\'ai perdu .', 'il est calme .', 'je suis chez moi .']
+    for eng, fra in zip(engs, fras):
+        translation, dec_attention_weight_seq = predict_seq2seq(
+            net, eng, src_vocab, tgt_vocab, num_step, device, True)
+        print(f'{eng} => {translation}')
+        # print(f'{eng} => {translation}, ',
+        #     f'bleu {d2l.bleu(translation, fra, k=2):.3f}')
 
 
 
